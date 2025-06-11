@@ -2,7 +2,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Constants ---
     const CACHE_KEY_ALL_ITEMS = 'gagDashAllItems';
     const VAPID_PUBLIC_KEY = 'REPLACE_WITH_YOUR_PUBLIC_KEY';
-    const PUSH_SERVER_URL = 'http://localhost:3000'; // URL of your push server
+    const PUSH_SERVER_URL = 'https://pushapi.spitkov.wtf'; // URL of your push server
     const API_BASE_URLS = [
         'https://growagardenapi.vercel.app/api',
         'http://localhost:1000/api'
