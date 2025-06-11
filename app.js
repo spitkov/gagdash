@@ -31,13 +31,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let notificationSubscriptions = new Set(JSON.parse(localStorage.getItem('gardenSubscriptions')) || []);
     let weatherSubscriptions = new Set(JSON.parse(localStorage.getItem('gardenWeatherSubscriptions')) || []);
     let allWeatherEvents = [];
-    let lastActiveWeatherEventId = null;
+    let lastActiveWeatherEventIds = new Set();
     let isInitialLoad = true;
     let notificationsEnabled = false;
     let restockTimers = {};
     let restockInterval;
     let allItemsInfo = new Map();
-    let weatherTimerInterval = null;
+    let weatherTimerIntervals = [];
 
     const CATEGORY_MAP = {
         gearStock: 'Gears & Utilities',
@@ -136,16 +136,20 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         if (data && data.success) {
             allWeatherEvents = data.weather;
-            const activeEvent = allWeatherEvents.find(event => event.active);
-            
-            if (activeEvent && activeEvent.weather_id !== lastActiveWeatherEventId) {
-                if (!isInitialLoad && weatherSubscriptions.has(activeEvent.weather_id)) {
-                    showWeatherNotification(activeEvent);
-                }
+            const activeEvents = allWeatherEvents.filter(event => event.active);
+            const newActiveEventIds = new Set(activeEvents.map(e => e.weather_id));
+
+            if (!isInitialLoad) {
+                const trulyNewEvents = activeEvents.filter(event => !lastActiveWeatherEventIds.has(event.weather_id));
+                trulyNewEvents.forEach(event => {
+                    if (weatherSubscriptions.has(event.weather_id)) {
+                        showWeatherNotification(event);
+                    }
+                });
             }
             
-            lastActiveWeatherEventId = activeEvent ? activeEvent.weather_id : null;
-            updateWeatherUI(allWeatherEvents);
+            lastActiveWeatherEventIds = newActiveEventIds;
+            updateWeatherUI(activeEvents);
         }
     }
     
@@ -364,46 +368,51 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function updateWeatherUI(weatherEvents) {
-        if (weatherTimerInterval) clearInterval(weatherTimerInterval);
-
-        if (!weatherEvents || weatherEvents.length === 0) {
-            elements.weatherData.innerHTML = '<p>No weather data available</p>';
-            return;
+    function updateWeatherUI(activeEvents) {
+        if (weatherTimerIntervals.length > 0) {
+            weatherTimerIntervals.forEach(clearInterval);
+            weatherTimerIntervals = [];
         }
-        const activeEvent = weatherEvents.find(event => event.active);
-        
-        if (activeEvent) {
-            const weatherHtml = `
-                <div class="text-center p-4 bg-garden-dark rounded-lg">
-                    <p class="text-2xl font-bold text-yellow-400">${activeEvent.weather_name}</p>
-                    <p class="text-slate-400">is currently active!</p>
-                    <p class="text-lg mt-2">Ends in: <span id="weather-countdown">${formatTimeLeft(activeEvent.end_duration_unix)}</span></p>
-                </div>
-            `;
-            elements.weatherData.innerHTML = weatherHtml;
-            
-            const countdownEl = document.getElementById('weather-countdown');
-            weatherTimerInterval = setInterval(() => {
-                if (countdownEl) {
-                    const timeLeft = formatTimeLeft(activeEvent.end_duration_unix);
-                    countdownEl.textContent = timeLeft;
-                    if (timeLeft === '00:00:00') {
-                        countdownEl.textContent = 'Ended';
-                        clearInterval(weatherTimerInterval);
-                    }
-                } else {
-                     clearInterval(weatherTimerInterval);
-                }
-            }, 1000);
-        } else {
+
+        if (!activeEvents || activeEvents.length === 0) {
             elements.weatherData.innerHTML = `
                 <div class="text-center p-4">
                     <p class="text-2xl font-medium text-slate-300">Weather is Clear</p>
                     <p class="text-slate-400">No active events.</p>
                 </div>
             `;
+            return;
         }
+        
+        const eventsHtml = activeEvents.map(event => `
+            <div class="text-center p-4 bg-garden-dark rounded-lg">
+                <p class="text-2xl font-bold text-yellow-400">${event.weather_name}</p>
+                <p class="text-slate-400">is currently active!</p>
+                <p class="text-lg mt-2">Ends in: <span id="weather-countdown-${event.weather_id}">${formatTimeLeft(event.end_duration_unix)}</span></p>
+            </div>
+        `).join('');
+
+        elements.weatherData.innerHTML = `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">${eventsHtml}</div>`;
+
+        activeEvents.forEach(event => {
+            const countdownEl = document.getElementById(`weather-countdown-${event.weather_id}`);
+            if (countdownEl) {
+                const intervalId = setInterval(() => {
+                    const timeLeft = formatTimeLeft(event.end_duration_unix);
+                    countdownEl.textContent = timeLeft;
+                    if (timeLeft === '00:00:00') {
+                        countdownEl.textContent = 'Ended';
+                        // Find and remove this specific interval
+                        const index = weatherTimerIntervals.indexOf(intervalId);
+                        if (index > -1) {
+                            clearInterval(weatherTimerIntervals[index]);
+                            weatherTimerIntervals.splice(index, 1);
+                        }
+                    }
+                }, 1000);
+                weatherTimerIntervals.push(intervalId);
+            }
+        });
     }
 
     function formatTimeLeft(unixTimestamp) {
