@@ -50,7 +50,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function initializeApp() {
         setupEventListeners();
-        loadAllItemsInfo();
         fetchAllData();
         initializeNotificationState();
         startMainRefreshInterval();
@@ -151,13 +150,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Could not load item info data.');
         });
         if (data && Array.isArray(data)) {
-            const newCacheObject = { timestamp: Date.now(), data };
-            const currentCache = localStorage.getItem('gardenAllItemsInfo');
-            if (JSON.stringify(newCacheObject.data) !== (currentCache ? JSON.parse(currentCache).data : null)) {
-                console.log("Updating cached item info.");
-                localStorage.setItem('gardenAllItemsInfo', JSON.stringify(newCacheObject));
-                data.forEach(item => allItemsInfo.set(item.name, item));
-            }
+            data.forEach(item => allItemsInfo.set(item.name, item));
         }
     }
 
@@ -740,18 +733,5 @@ document.addEventListener('DOMContentLoaded', () => {
                 showNotification(item);
             }
         });
-    }
-
-    function loadAllItemsInfo() {
-        const cachedData = localStorage.getItem('gardenAllItemsInfo');
-        if (cachedData) {
-            console.log("Loading item info from cache.");
-            const { timestamp, data } = JSON.parse(cachedData);
-            if (Date.now() - timestamp < 24 * 60 * 60 * 1000) {
-                data.forEach(item => allItemsInfo.set(item.name, item));
-            } else {
-                console.log("Item info cache is stale.");
-            }
-        }
     }
 });
