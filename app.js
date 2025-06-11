@@ -50,6 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function initializeApp() {
         setupEventListeners();
+        loadAllItemsInfo();
         fetchAllData();
         initializeNotificationState();
         startMainRefreshInterval();
@@ -92,29 +93,39 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function fetchAllData() {
         try {
-            await Promise.all([
+            const promises = [
                 fetchWeatherData(),
                 fetchStockData(),
                 fetchAllItemsInfo()
-            ]);
+            ];
+
             if (!stockPollInterval) {
-                fetchRestockTimes();
+                promises.push(fetchRestockTimes());
             }
+            await Promise.all(promises);
         } catch (error) {
             console.error('Error during initial data fetch:', error);
         }
     }
 
-    async function fetchData(endpoint, onError) {
-        try {
-            const response = await fetch(endpoint);
-            if (!response.ok) throw new Error(`Failed to fetch from ${endpoint}`);
-            return await response.json();
-        } catch (error) {
-            console.error(`Fetch error for ${endpoint}:`, error);
-            onError(error);
-            return null;
+    async function fetchData(endpoint, onError, retries = 3, delay = 1000) {
+        for (let i = 0; i < retries; i++) {
+            try {
+                const response = await fetch(endpoint);
+                if (!response.ok) throw new Error(`Failed to fetch from ${endpoint} with status ${response.status}`);
+                return await response.json();
+            } catch (error) {
+                console.error(`Fetch attempt ${i + 1} for ${endpoint} failed. Retrying in ${delay / 1000}s...`, error);
+                if (i === retries - 1) {
+                    console.error(`All fetch attempts for ${endpoint} failed.`);
+                    onError(error);
+                    return null;
+                }
+                await new Promise(res => setTimeout(res, delay));
+                delay *= 2;
+            }
         }
+        return null;
     }
 
     async function fetchWeatherData() {
@@ -140,7 +151,13 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error('Could not load item info data.');
         });
         if (data && Array.isArray(data)) {
-            data.forEach(item => allItemsInfo.set(item.name, item));
+            const newCacheObject = { timestamp: Date.now(), data };
+            const currentCache = localStorage.getItem('gardenAllItemsInfo');
+            if (JSON.stringify(newCacheObject.data) !== (currentCache ? JSON.parse(currentCache).data : null)) {
+                console.log("Updating cached item info.");
+                localStorage.setItem('gardenAllItemsInfo', JSON.stringify(newCacheObject));
+                data.forEach(item => allItemsInfo.set(item.name, item));
+            }
         }
     }
 
@@ -233,14 +250,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const categoryId = categoryName.toLowerCase().replace(/[^a-z0-9]/g, '');
             html += `
-                <div class="bg-garden-darker rounded-lg shadow-lg flex flex-col h-full">
+                <div class="bg-garden-darker rounded-lg shadow-lg flex flex-col max-h-[80vh]">
                     <div class="p-4 border-b border-slate-700 flex justify-between items-center">
                         <h3 class="text-xl font-bold text-garden-accent">${categoryName}</h3>
                         <div id="restock-${categoryId}" class="text-sm text-slate-400">
                             <span class="font-mono">--:--:--</span>
                         </div>
                     </div>
-                    <div class="p-4 flex flex-col gap-2 overflow-y-auto">
+                    <div class="p-4 flex flex-col gap-2 overflow-y-auto flex-1">
                         ${items.map(item => createItemCard(item)).join('')}
                     </div>
                 </div>
@@ -723,5 +740,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 showNotification(item);
             }
         });
+    }
+
+    function loadAllItemsInfo() {
+        const cachedData = localStorage.getItem('gardenAllItemsInfo');
+        if (cachedData) {
+            console.log("Loading item info from cache.");
+            const { timestamp, data } = JSON.parse(cachedData);
+            if (Date.now() - timestamp < 24 * 60 * 60 * 1000) {
+                data.forEach(item => allItemsInfo.set(item.name, item));
+            } else {
+                console.log("Item info cache is stale.");
+            }
+        }
     }
 });
