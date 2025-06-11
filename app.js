@@ -29,6 +29,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let stockPollInterval = null;
     let mainRefreshInterval = null;
     let notificationSubscriptions = new Set(JSON.parse(localStorage.getItem('gardenSubscriptions')) || []);
+    let weatherSubscriptions = new Set(JSON.parse(localStorage.getItem('gardenWeatherSubscriptions')) || []);
+    let allWeatherEvents = [];
+    let lastActiveWeatherEventId = null;
     let isInitialLoad = true;
     let notificationsEnabled = false;
     let restockTimers = {};
@@ -132,7 +135,17 @@ document.addEventListener('DOMContentLoaded', () => {
             elements.weatherData.innerHTML = `<p class="text-red-400">Error loading weather</p>`;
         });
         if (data && data.success) {
-            updateWeatherUI(data.weather);
+            allWeatherEvents = data.weather;
+            const activeEvent = allWeatherEvents.find(event => event.active);
+            
+            if (activeEvent && activeEvent.weather_id !== lastActiveWeatherEventId) {
+                if (!isInitialLoad && weatherSubscriptions.has(activeEvent.weather_id)) {
+                    showWeatherNotification(activeEvent);
+                }
+            }
+            
+            lastActiveWeatherEventId = activeEvent ? activeEvent.weather_id : null;
+            updateWeatherUI(allWeatherEvents);
         }
     }
     
@@ -548,6 +561,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function showWeatherNotification(event) {
+        if (!notificationsEnabled) return;
+
+        new Notification("Weather Alert!", {
+            body: `A ${event.weather_name} event has started!`,
+            icon: 'https://cdn-icons-png.flaticon.com/512/1163/1163661.png'
+        });
+    }
+
     function updateNotifyButtonUI(itemName) {
         if (notificationSubscriptions.has(itemName)) {
             elements.notifyBtn.textContent = 'Unsubscribe from Notifications';
@@ -589,7 +611,33 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function renderNotificationConfig() {
-        let html = '';
+        let weatherHtml = '';
+        if (allWeatherEvents.length > 0) {
+            const subscribedCount = allWeatherEvents.filter(e => weatherSubscriptions.has(e.weather_id)).length;
+            weatherHtml = `
+                <details class="bg-garden-dark rounded-lg overflow-hidden group mb-4" data-section="weather">
+                    <summary class="flex items-center justify-between p-3 cursor-pointer hover:bg-slate-800 transition-colors">
+                        <div>
+                            <p class="font-bold text-slate-200">Weather & Special Events</p>
+                            <p class="text-xs text-slate-400">${subscribedCount} / ${allWeatherEvents.length} events subscribed</p>
+                        </div>
+                        <div class="group-open:rotate-90 transition-transform">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clip-rule="evenodd" /></svg>
+                        </div>
+                    </summary>
+                    <div class="p-4 border-t border-slate-700 max-h-60 overflow-y-auto custom-scrollbar">
+                        ${allWeatherEvents.sort((a,b) => a.weather_name.localeCompare(b.weather_name)).map(event => `
+                            <label for="sub-weather-${event.weather_id}" class="flex items-center p-2 rounded-md hover:bg-slate-800 cursor-pointer">
+                                <input type="checkbox" id="sub-weather-${event.weather_id}" data-weather-id="${event.weather_id}" class="weather-subscription-toggle form-checkbox h-4 w-4 bg-slate-700 border-slate-600 rounded text-garden-primary focus:ring-garden-primary" ${weatherSubscriptions.has(event.weather_id) ? 'checked' : ''}>
+                                <span class="ml-3 text-sm text-slate-300">${event.weather_name}</span>
+                            </label>
+                        `).join('')}
+                    </div>
+                </details>
+            `;
+        }
+        
+        let itemHtml = '<h4 class="text-lg font-bold text-garden-accent mb-2 border-t border-slate-700 pt-4 mt-4">Item Notifications</h4>';
         const itemsByCategory = {};
         for (const item of allItemsInfo.values()) {
             if (!item.category || item.category === 'N/A') continue;
@@ -616,7 +664,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 toggleTransform = 'translateX(24px)';
             }
 
-            html += `
+            itemHtml += `
                 <details class="bg-garden-dark rounded-lg overflow-hidden group" data-category-name="${categoryName}">
                     <summary class="flex items-center justify-between p-3 cursor-pointer hover:bg-slate-800 transition-colors">
                         <div class="flex-grow">
@@ -645,7 +693,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 </details>
             `;
         }
-        elements.notificationConfigContent.innerHTML = html;
+
+        elements.notificationConfigContent.innerHTML = weatherHtml + itemHtml;
+
+        document.querySelectorAll('.weather-subscription-toggle').forEach(checkbox => {
+            checkbox.addEventListener('change', (e) => {
+                const weatherId = e.currentTarget.dataset.weatherId;
+                if (e.currentTarget.checked) {
+                    weatherSubscriptions.add(weatherId);
+                } else {
+                    weatherSubscriptions.delete(weatherId);
+                }
+                localStorage.setItem('gardenWeatherSubscriptions', JSON.stringify(Array.from(weatherSubscriptions)));
+                updateWeatherSubscriptionUI();
+            });
+        });
 
         document.querySelectorAll('.category-toggle').forEach(toggle => {
             toggle.addEventListener('click', (e) => {
@@ -656,7 +718,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
 
-         document.querySelectorAll('.item-subscription-toggle').forEach(checkbox => {
+        document.querySelectorAll('.item-subscription-toggle').forEach(checkbox => {
             checkbox.addEventListener('change', (e) => {
                 const itemName = e.currentTarget.dataset.itemName;
                 if (e.currentTarget.checked) {
@@ -671,7 +733,19 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function updateWeatherSubscriptionUI() {
+        const weatherDetailsElement = document.querySelector('details[data-section="weather"]');
+        if (!weatherDetailsElement) return;
+
+        const subscribedCount = allWeatherEvents.filter(e => weatherSubscriptions.has(e.weather_id)).length;
+        const countElement = weatherDetailsElement.querySelector('.text-xs');
+        if (countElement) {
+            countElement.textContent = `${subscribedCount} / ${allWeatherEvents.length} events subscribed`;
+        }
+    }
+
     function updateCategorySubscriptionUI(detailsElement) {
+        if (!detailsElement) return;
         const categoryName = detailsElement.dataset.categoryName;
         const itemsInCategory = Array.from(allItemsInfo.values()).filter(item => item.category === categoryName);
         const subscribedCount = itemsInCategory.filter(item => notificationSubscriptions.has(item.name)).length;
